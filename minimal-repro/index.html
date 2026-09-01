@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Firefox MutationObserver Feedback Loop Prototype</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 40px;
+      line-height: 1.5;
+      background: #18181b;
+      color: #f4f4f5;
+    }
+    .card {
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 650px;
+      margin-bottom: 20px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      background: #ef4444;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    button {
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    .btn-safe {
+      background: #22c55e;
+      color: #000;
+    }
+    .btn-danger {
+      background: #ef4444;
+      color: #fff;
+    }
+    #counter {
+      font-family: monospace;
+      font-size: 20px;
+      color: #38bdf8;
+      margin-top: 10px;
+    }
+    #container {
+      margin-top: 20px;
+      padding: 16px;
+      border: 2px dashed #52525b;
+      border-radius: 6px;
+    }
+    .marker {
+      width: 24px;
+      height: 24px;
+      background: #f59e0b;
+      border-radius: 50%;
+      display: inline-block;
+      margin: 4px;
+    }
+    #log {
+      max-height: 150px;
+      overflow-y: auto;
+      background: #09090b;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 12px;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="badge">DEMO / PROTOTYPE</div>
+    <h2>MutationObserver Self-Triggering Feedback Loop</h2>
+    <p>
+      This reproduces the exact pattern found in <code>circulatelo.com</code>:
+      A <code>MutationObserver</code> observes <code>style</code> attribute mutations on a container with <code>subtree: true</code>,
+      and its callback modifies the <code>style</code> attribute on elements inside that subtree.
+    </p>
+
+    <!-- Controls -->
+    <button class="btn-safe" id="btn-capped">Trigger Safe Test (10,000 loop cap)</button>
+    <button class="btn-danger" id="btn-uncapped">Trigger Uncapped Infinite Loop</button>
+
+    <div id="counter">Mutations triggered: 0</div>
+    <div id="log">Logs will appear here...</div>
+
+    <!-- Target container -->
+    <div id="container">
+      <strong>Observed Container (#container)</strong>
+      <div id="marker-list">
+        <div class="marker marker-hidden" id="marker-1"></div>
+        <div class="marker marker-hidden" id="marker-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const container = document.getElementById('container');
+    const counterEl = document.getElementById('counter');
+    const logEl = document.getElementById('log');
+    const btnCapped = document.getElementById('btn-capped');
+    const btnUncapped = document.getElementById('btn-uncapped');
+
+    let mutationCount = 0;
+    let observer = null;
+
+    function log(msg) {
+      const line = document.createElement('div');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.prepend(line);
+    }
+
+    function startDemo(withSafetyCap) {
+      if (observer) {
+        observer.disconnect();
+      }
+
+      mutationCount = 0;
+      counterEl.textContent = `Mutations triggered: 0`;
+      log(`Starting observer (Capped: ${withSafetyCap})...`);
+
+      const markers = Array.from(document.querySelectorAll('.marker'));
+
+      observer = new MutationObserver(function (mutationsList) {
+        mutationCount++;
+        
+        if (mutationCount % 500 === 0 || mutationCount < 20) {
+          counterEl.textContent = `Mutations triggered: ${mutationCount.toLocaleString()}`;
+        }
+
+        if (withSafetyCap && mutationCount >= 10000) {
+          log(`Safety limit reached (10,000 iterations)! Disconnecting observer.`);
+          observer.disconnect();
+          counterEl.textContent = `Mutations triggered: ${mutationCount.toLocaleString()} (Stopped by Safety Cap)`;
+          return;
+        }
+
+        // --- EXACT CODE PATTERN FROM CIRCULATELO ---
+        markers.forEach(function (el) {
+          if (el.classList.contains('marker-hidden')) {
+            // Modifying style INSIDE observed subtree triggers the observer AGAIN!
+            el.style.opacity = '0';
+            el.style.pointerEvents = 'none';
+          }
+        });
+        // -------------------------------------------
+      });
+
+      // Observe the container's subtree for style changes
+      observer.observe(container, {
+        attributes: true,
+        subtree: true,
+        attributeFilter: ['style']
+      });
+
+      // Initial trigger
+      log('Triggering initial style mutation to start the feedback loop...');
+      const firstMarker = document.getElementById('marker-1');
+      firstMarker.style.opacity = '0.99';
+    }
+
+    btnCapped.addEventListener('click', () => startDemo(true));
+    btnUncapped.addEventListener('click', () => {
+      if (confirm('Warning: This will run without bounds in Firefox. Continue?')) {
+        startDemo(false);
+      }
+    });
+  </script>
+</body>
+</html>
