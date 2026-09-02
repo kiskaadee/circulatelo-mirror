@@ -319,6 +319,22 @@ document.querySelectorAll(".event-item").forEach(function (card) {
   CIRCULATELO — Map + Search (API-driven)
   ============================================================
 -->
+<style>
+  /* 
+   * [FIX] Hide filtered mapbox markers declaratively using CSS.
+   * 
+   * WHY THIS REPLACES MUTATIONOBSERVER:
+   * Mapbox GL JS dynamically manages inline styles (such as transform / positioning) 
+   * on marker elements during panning and zooming. 
+   * Using '!important' in CSS guarantees hidden markers stay invisible and unclickable 
+   * without having to listen for DOM style mutations in JavaScript.
+   */
+  .mapboxgl-marker.marker-hidden,
+  .custom-map-marker.marker-hidden {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+</style>
 <script>
   const MAPBOX_JS_URL = 'https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.js';
   const MAPBOX_CSS_URL = 'https://api.mapbox.com/mapbox-gl-js/v3.21.0/mapbox-gl.css';
@@ -636,13 +652,36 @@ document.querySelectorAll(".event-item").forEach(function (card) {
         updateSearch();
       });
     });
-    const mutationObserver = new MutationObserver(function () {
-      allMarkers.forEach(function (item) {
-        const el = item.marker.getElement();
-        if (el.classList.contains('marker-hidden')) { el.style.opacity = '0'; el.style.pointerEvents = 'none'; }
-      });
-    });
-    mutationObserver.observe(map.getContainer(), { attributes: true, subtree: true, attributeFilter: ['style'] });
+    /*
+     * [BUG FIX & REMOVAL: Recursive MutationObserver Feedback Loop]
+     * 
+     * ORIGINAL BUGGY CODE:
+     * -------------------------------------------------------------
+     * const mutationObserver = new MutationObserver(function () {
+     *   allMarkers.forEach(function (item) {
+     *     const el = item.marker.getElement();
+     *     if (el.classList.contains('marker-hidden')) {
+     *       el.style.opacity = '0';
+     *       el.style.pointerEvents = 'none';
+     *     }
+     *   });
+     * });
+     * mutationObserver.observe(map.getContainer(), { attributes: true, subtree: true, attributeFilter: ['style'] });
+     * -------------------------------------------------------------
+     * 
+     * HOW THE BUG OCCURRED:
+     * 1. This observer watched the 'style' attribute across the entire map container subtree.
+     * 2. When any style changed (e.g. Mapbox canvas rendering, user panning/zooming, or initial load),
+     *    the observer callback fired.
+     * 3. Inside the callback, writing to `el.style.opacity = '0'` on marker elements MUTATED the 'style' attribute.
+     * 4. Modifying 'style' within the observed subtree immediately queued another MutationObserver microtask.
+     * 5. In Firefox (Gecko), this triggered an unbounded, synchronous microtask spiral that allocated
+     *    millions of MutationRecords, causing memory bloat, high CPU, and eventually freezing the graphical session.
+     * 
+     * RESOLUTION:
+     * Removed the observer entirely. Marker visibility is now handled declaratively by adding/removing
+     * the '.marker-hidden' class in updateSearch() and applying the CSS rule above.
+     */
     sidebarCards.forEach(function (card) {
       card.style.cursor = 'pointer';
       card.addEventListener('click', function () {
